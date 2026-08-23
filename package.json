@@ -1,0 +1,56 @@
+{
+  "name": "aiko",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist-electron/main/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && electron-builder",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SlameGX/AIKO.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/SlameGX/AIKO/issues"
+  },
+  "homepage": "https://github.com/SlameGX/AIKO#readme",
+  "build": {
+    "appId": "com.aiko.desktop",
+    "productName": "Aiko Companion",
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ]
+  },
+  "devDependencies": {
+    "electron": "^43.4.1",
+    "electron-builder": "^26.15.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2",
+    "vite-plugin-electron": "^1.1.1",
+    "vite-plugin-electron-renderer": "^1.0.0"
+  },
+  "dependencies": {
+    "@pixi/sound": "^6.0.1",
+    "pixi.js": "^8.20.0",
+    "untitled-pixi-live2d-engine": "^1.3.5"
+  }
+}
