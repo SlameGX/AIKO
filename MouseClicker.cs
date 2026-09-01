@@ -1,0 +1,56 @@
+using System;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+namespace MouseClicker
+{
+    class Program
+    {
+        [DllImport("user32.dll", CharSet = CharSet.Auto, CallingConvention = CallingConvention.StdCall)]
+        public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint cButtons, uint dwExtraInfo);
+
+        [DllImport("user32.dll")]
+        static extern bool SetCursorPos(int X, int Y);
+
+        private const int MOUSEEVENTF_LEFTDOWN = 0x02;
+        private const int MOUSEEVENTF_LEFTUP = 0x04;
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool SetProcessDPIAware();
+
+        static void Main(string[] args)
+        {
+            if (Environment.OSVersion.Version.Major >= 6) {
+                SetProcessDPIAware();
+            }
+
+            if (args.Length < 3) return;
+            
+            string action = args[0].ToLower();
+            int x;
+            int y;
+            if (int.TryParse(args[1], out x) && int.TryParse(args[2], out y))
+            {
+                SetCursorPos(x, y);
+                Thread.Sleep(50); // Give it a slight moment to settle
+
+                if (action == "click")
+                {
+                    mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                    Thread.Sleep(10);
+                    mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                }
+                else if (action == "doubleclick")
+                {
+                    mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                    Thread.Sleep(10);
+                    mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                    Thread.Sleep(50);
+                    mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                    Thread.Sleep(10);
+                    mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                }
+            }
+        }
+    }
+}

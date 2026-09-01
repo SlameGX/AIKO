@@ -194,6 +194,42 @@ wss.on('connection', (ws) => {
                     aiResponseText = aiResponseText.replace(/\[POINT:\d+,\d+:.*?\]/g, '').trim();
                 }
 
+                // Parse and execute normalized Click requests [CLICK:x,y]
+                const clickMatch = aiResponseText.match(/\[CLICK:(\d+),(\d+)\]/);
+                if (clickMatch) {
+                    const normX = parseInt(clickMatch[1], 10);
+                    const normY = parseInt(clickMatch[2], 10);
+                    
+                    const pixelX = Math.round((normX / 1000) * imgWidth);
+                    const pixelY = Math.round((normY / 1000) * imgHeight);
+
+                    console.log(`AI requested to click at normalized ${normX}, ${normY} -> Clicking at pixels ${pixelX}, ${pixelY}`);
+                    exec(`DrawClick.exe ${pixelX} ${pixelY}`, (err) => { if (err) console.error("Error drawing click:", err); });
+                    exec(`MouseClicker.exe click ${pixelX} ${pixelY}`, (error) => {
+                        if (error) console.error("Error clicking:", error);
+                    });
+                    
+                    aiResponseText = aiResponseText.replace(/\[CLICK:\d+,\d+\]/g, '').trim();
+                }
+
+                // Parse and execute normalized Double Click requests [DOUBLE_CLICK:x,y]
+                const dblClickMatch = aiResponseText.match(/\[DOUBLE_CLICK:(\d+),(\d+)\]/);
+                if (dblClickMatch) {
+                    const normX = parseInt(dblClickMatch[1], 10);
+                    const normY = parseInt(dblClickMatch[2], 10);
+                    
+                    const pixelX = Math.round((normX / 1000) * imgWidth);
+                    const pixelY = Math.round((normY / 1000) * imgHeight);
+
+                    console.log(`AI requested to double click at normalized ${normX}, ${normY} -> Double clicking at pixels ${pixelX}, ${pixelY}`);
+                    exec(`DrawClick.exe ${pixelX} ${pixelY} double`, (err) => { if (err) console.error("Error drawing double click:", err); });
+                    exec(`MouseClicker.exe doubleclick ${pixelX} ${pixelY}`, (error) => {
+                        if (error) console.error("Error double clicking:", error);
+                    });
+                    
+                    aiResponseText = aiResponseText.replace(/\[DOUBLE_CLICK:\d+,\d+\]/g, '').trim();
+                }
+
                 console.log('AI Response:', aiResponseText);
 
                 // 3. Send response back to frontend

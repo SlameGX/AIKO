@@ -69,7 +69,7 @@ function connectWebSocket() {
             removeLoadingIndicator();
             statusText.innerText = "Bağlı";
             appendMessage(data.text, 'ai');
-            speakText(data.text);
+            // speakText(data.text); // Kullanıcı isteği üzerine sesli okuma kapatıldı
         } else if (data.type === 'error') {
             removeLoadingIndicator();
             statusText.innerText = "Bağlı";
