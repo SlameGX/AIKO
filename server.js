@@ -73,170 +73,217 @@ wss.on('connection', (ws) => {
                     }
                 ];
 
-                // 2. Call OpenAI API (Text only first)
-                let response = await ai.chat.completions.create({
-                    model: process.env.MODEL_NAME || 'gemini-3.1-pro',
-                    messages: messages,
-                    temperature: 0.7,
-                    tools: tools
-                });
+                const delay = ms => new Promise(res => setTimeout(res, ms));
 
-                let aiResponseText = response.choices[0].message.content || "";
-                const toolCalls = response.choices[0].message.tool_calls;
-                
-                // Process tool calls if AI decided to use any
-                if (toolCalls && toolCalls.length > 0) {
-                    for (const toolCall of toolCalls) {
-                        if (toolCall.function.name === 'send_email') {
-                            try {
-                                const emailData = JSON.parse(toolCall.function.arguments);
-                                console.log('AI autonomously decided to send an email:', emailData);
-                                
-                                fetch("https://n8n.feedagency.dev/webhook/88748273-7f98-4d16-86aa-8014f29fcc6b", {
-                                    method: "POST",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify(emailData)
-                                }).then(res => console.log("Email request sent to n8n. Status:", res.status))
-                                  .catch(err => console.error("Failed to send email to n8n:", err));
-                                  
-                                // If the AI didn't provide a text response, set a default one.
-                                if (!aiResponseText) {
-                                    aiResponseText = "Maili başarıyla gönderdim.";
-                                }
-                            } catch (e) {
-                                console.error('Failed to parse tool arguments:', e);
-                            }
-                        }
+                async function processAgentLoop(currentMessages, ws, takeScreenshotFirst = false) {
+                    let loopImgWidth = 1920;
+                    let loopImgHeight = 1080;
+
+                    if (takeScreenshotFirst) {
+                        console.log('Taking screenshot for NEXT_STEP...');
+                        ws.send(JSON.stringify({ type: 'status', text: 'Yeni ekrana bakıyor...' }));
+                        
+                        const imgBuffer = await screenshot({ format: 'png' });
+                        const metadata = await sharp(imgBuffer).metadata();
+                        loopImgWidth = metadata.width;
+                        loopImgHeight = metadata.height;
+                        const resizedBuffer = await sharp(imgBuffer).resize({ width: Math.round(loopImgWidth / 2) }).toBuffer();
+                        const base64Image = resizedBuffer.toString('base64');
+
+                        // Remove older screenshots from history to save tokens
+                        currentMessages = currentMessages.filter(msg => !(Array.isArray(msg.content) && msg.content.some(c => c.type === 'image_url')));
+
+                        currentMessages.push({
+                            role: 'user',
+                            content: [
+                                { type: 'text', text: 'İşte yeni ekran görüntüsü. Kaldığın yerden işleme devam et.' },
+                                { type: 'image_url', image_url: { url: `data:image/png;base64,${base64Image}` } }
+                            ]
+                        });
                     }
-                }
 
-                // 3. Check if AI wants to see the screen
-                if (aiResponseText.includes('[SCREENSHOT_REQUEST]')) {
-                    console.log('AI requested a screenshot. Taking screenshot...');
-                    ws.send(JSON.stringify({ type: 'status', text: 'Ekrana bakıyor...' }));
-
-                    const imgBuffer = await screenshot({ format: 'png' });
-                    
-                    // Get original image dimensions for coordinate mapping
-                    const metadata = await sharp(imgBuffer).metadata();
-                    imgWidth = metadata.width;
-                    imgHeight = metadata.height;
-                    
-                    // Downscale the image to 50% to save API tokens massively
-                    const resizedBuffer = await sharp(imgBuffer)
-                        .resize({ width: Math.round(imgWidth / 2) })
-                        .toBuffer();
-                    
-                    const base64Image = resizedBuffer.toString('base64');
-                    
-                    // Add AI's request to history
-                    messages.push({ role: 'assistant', content: aiResponseText });
-                    
-                    // Add image to next user prompt
-                    messages.push({
-                        role: 'user',
-                        content: [
-                            { type: 'text', text: 'İşte ekran görüntüsü. Lütfen soruma buna göre cevap ver.' },
-                            { type: 'image_url', image_url: { url: `data:image/png;base64,${base64Image}` } }
-                        ]
-                    });
-
-                    // Call API again with image
-                    response = await ai.chat.completions.create({
+                    // 2. Call OpenAI API
+                    let response = await ai.chat.completions.create({
                         model: process.env.MODEL_NAME || 'gemini-3.1-pro',
-                        messages: messages,
+                        messages: currentMessages,
                         temperature: 0.7,
                         tools: tools
                     });
+
+                    let aiResponseText = response.choices[0].message.content || "";
+                    const toolCalls = response.choices[0].message.tool_calls;
                     
-                    aiResponseText = response.choices[0].message.content || "";
-                    
-                    // Also check for tool calls in the second response
-                    const toolCalls2 = response.choices[0].message.tool_calls;
-                    if (toolCalls2 && toolCalls2.length > 0) {
-                        for (const toolCall of toolCalls2) {
+                    // Process tool calls if AI decided to use any
+                    if (toolCalls && toolCalls.length > 0) {
+                        for (const toolCall of toolCalls) {
                             if (toolCall.function.name === 'send_email') {
                                 try {
                                     const emailData = JSON.parse(toolCall.function.arguments);
-                                    console.log('AI autonomously decided to send an email (after screenshot):', emailData);
+                                    console.log('AI autonomously decided to send an email:', emailData);
                                     
                                     fetch("https://n8n.feedagency.dev/webhook/88748273-7f98-4d16-86aa-8014f29fcc6b", {
                                         method: "POST",
                                         headers: { "Content-Type": "application/json" },
                                         body: JSON.stringify(emailData)
-                                    });
-                                    if (!aiResponseText) aiResponseText = "Maili gönderdim.";
-                                } catch (e) {}
+                                    }).then(res => console.log("Email request sent to n8n. Status:", res.status))
+                                      .catch(err => console.error("Failed to send email to n8n:", err));
+                                      
+                                    if (!aiResponseText) aiResponseText = "Maili başarıyla gönderdim.";
+                                } catch (e) {
+                                    console.error('Failed to parse tool arguments:', e);
+                                }
                             }
                         }
                     }
+
+                    // 3. Check if AI wants to see the screen (only if we didn't just take one)
+                    if (!takeScreenshotFirst && aiResponseText.includes('[SCREENSHOT_REQUEST]')) {
+                        console.log('AI requested a screenshot. Taking screenshot...');
+                        ws.send(JSON.stringify({ type: 'status', text: 'Ekrana bakıyor...' }));
+
+                        const imgBuffer = await screenshot({ format: 'png' });
+                        const metadata = await sharp(imgBuffer).metadata();
+                        loopImgWidth = metadata.width;
+                        loopImgHeight = metadata.height;
+                        const resizedBuffer = await sharp(imgBuffer).resize({ width: Math.round(loopImgWidth / 2) }).toBuffer();
+                        const base64Image = resizedBuffer.toString('base64');
+                        
+                        currentMessages.push({ role: 'assistant', content: aiResponseText });
+                        
+                        currentMessages = currentMessages.filter(msg => !(Array.isArray(msg.content) && msg.content.some(c => c.type === 'image_url')));
+                        
+                        currentMessages.push({
+                            role: 'user',
+                            content: [
+                                { type: 'text', text: 'İşte ekran görüntüsü. Lütfen soruma buna göre cevap ver.' },
+                                { type: 'image_url', image_url: { url: `data:image/png;base64,${base64Image}` } }
+                            ]
+                        });
+
+                        response = await ai.chat.completions.create({
+                            model: process.env.MODEL_NAME || 'gemini-3.1-pro',
+                            messages: currentMessages,
+                            temperature: 0.7,
+                            tools: tools
+                        });
+                        
+                        aiResponseText = response.choices[0].message.content || "";
+                        
+                        const toolCalls2 = response.choices[0].message.tool_calls;
+                        if (toolCalls2 && toolCalls2.length > 0) {
+                            for (const toolCall of toolCalls2) {
+                                if (toolCall.function.name === 'send_email') {
+                                    try {
+                                        const emailData = JSON.parse(toolCall.function.arguments);
+                                        fetch("https://n8n.feedagency.dev/webhook/88748273-7f98-4d16-86aa-8014f29fcc6b", {
+                                            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(emailData)
+                                        });
+                                        if (!aiResponseText) aiResponseText = "Maili gönderdim.";
+                                    } catch (e) {}
+                                }
+                            }
+                        }
+                    }
+
+                    aiResponseText = aiResponseText.replace(/\[SCREENSHOT_REQUEST\]/g, '').trim();
+                    
+                    let hasNextStep = false;
+                    if (aiResponseText.includes('[NEXT_STEP]')) {
+                        hasNextStep = true;
+                        aiResponseText = aiResponseText.replace(/\[NEXT_STEP\]/g, '').trim();
+                        currentMessages.push({ role: 'assistant', content: aiResponseText });
+                    }
+                    
+                    // Parse and execute normalized Point requests [POINT:x,y:label]
+                    const pointMatch = aiResponseText.match(/\[POINT:(\d+),(\d+):(.*?)\]/);
+                    if (pointMatch) {
+                        const normX = parseInt(pointMatch[1], 10);
+                        const normY = parseInt(pointMatch[2], 10);
+                        const pixelX = Math.round((normX / 1000) * loopImgWidth);
+                        const pixelY = Math.round((normY / 1000) * loopImgHeight);
+                        console.log(`AI requested to point at normalized ${normX}, ${normY} -> Drawing at pixels ${pixelX}, ${pixelY}`);
+                        exec(`DrawCircle.exe ${pixelX} ${pixelY}`, (error) => { if (error) console.error("Error drawing circle:", error); });
+                        aiResponseText = aiResponseText.replace(/\[POINT:\d+,\d+:.*?\]/g, '').trim();
+                    }
+
+                    // Parse and execute normalized Click requests [CLICK:x,y]
+                    const clickMatch = aiResponseText.match(/\[CLICK:(\d+),(\d+)\]/);
+                    if (clickMatch) {
+                        const normX = parseInt(clickMatch[1], 10);
+                        const normY = parseInt(clickMatch[2], 10);
+                        const pixelX = Math.round((normX / 1000) * loopImgWidth);
+                        const pixelY = Math.round((normY / 1000) * loopImgHeight);
+                        console.log(`AI requested to click at normalized ${normX}, ${normY} -> Clicking at pixels ${pixelX}, ${pixelY}`);
+                        exec(`DrawClick.exe ${pixelX} ${pixelY}`, (err) => { if (err) console.error("Error drawing click:", err); });
+                        exec(`MouseClicker.exe click ${pixelX} ${pixelY}`, (error) => { if (error) console.error("Error clicking:", error); });
+                        aiResponseText = aiResponseText.replace(/\[CLICK:\d+,\d+\]/g, '').trim();
+                    }
+
+                    // Parse and execute normalized Double Click requests [DOUBLE_CLICK:x,y]
+                    const dblClickMatch = aiResponseText.match(/\[DOUBLE_CLICK:(\d+),(\d+)\]/);
+                    if (dblClickMatch) {
+                        const normX = parseInt(dblClickMatch[1], 10);
+                        const normY = parseInt(dblClickMatch[2], 10);
+                        const pixelX = Math.round((normX / 1000) * loopImgWidth);
+                        const pixelY = Math.round((normY / 1000) * loopImgHeight);
+                        console.log(`AI requested to double click at normalized ${normX}, ${normY} -> Double clicking at pixels ${pixelX}, ${pixelY}`);
+                        exec(`DrawClick.exe ${pixelX} ${pixelY} double`, (err) => { if (err) console.error("Error drawing double click:", err); });
+                        exec(`MouseClicker.exe doubleclick ${pixelX} ${pixelY}`, (error) => { if (error) console.error("Error double clicking:", error); });
+                        aiResponseText = aiResponseText.replace(/\[DOUBLE_CLICK:\d+,\d+\]/g, '').trim();
+                    }
+
+                    // Parse and execute normalized Type requests [TYPE:x,y:text]
+                    const typeMatch = aiResponseText.match(/\[TYPE:(\d+),(\d+):(.*?)\]/);
+                    if (typeMatch) {
+                        const normX = parseInt(typeMatch[1], 10);
+                        const normY = parseInt(typeMatch[2], 10);
+                        const textToType = typeMatch[3];
+                        const pixelX = Math.round((normX / 1000) * loopImgWidth);
+                        const pixelY = Math.round((normY / 1000) * loopImgHeight);
+                        const base64Text = Buffer.from(textToType, 'utf-8').toString('base64');
+                        console.log(`AI requested to type at normalized ${normX}, ${normY} -> Clicking at ${pixelX}, ${pixelY} and typing: ${textToType}`);
+                        exec(`DrawClick.exe ${pixelX} ${pixelY}`, (err) => { if (err) console.error("Error drawing click:", err); });
+                        exec(`MouseClicker.exe click ${pixelX} ${pixelY}`, (error) => {
+                            if (error) console.error("Error clicking for type:", error);
+                            exec(`KeyboardTyper.exe ${base64Text}`, (err2) => { if (err2) console.error("Error typing:", err2); });
+                        });
+                        aiResponseText = aiResponseText.replace(/\[TYPE:\d+,\d+:.*?\]/g, '').trim();
+                    }
+
+                    // Parse and execute normalized Type+Enter requests [TYPE_ENTER:x,y:text]
+                    const typeEnterMatch = aiResponseText.match(/\[TYPE_ENTER:(\d+),(\d+):(.*?)\]/);
+                    if (typeEnterMatch) {
+                        const normX = parseInt(typeEnterMatch[1], 10);
+                        const normY = parseInt(typeEnterMatch[2], 10);
+                        const textToType = typeEnterMatch[3];
+                        const pixelX = Math.round((normX / 1000) * loopImgWidth);
+                        const pixelY = Math.round((normY / 1000) * loopImgHeight);
+                        const base64Text = Buffer.from(textToType, 'utf-8').toString('base64');
+                        console.log(`AI requested to type+enter at normalized ${normX}, ${normY} -> Clicking at ${pixelX}, ${pixelY} and typing: ${textToType}`);
+                        exec(`DrawClick.exe ${pixelX} ${pixelY}`, (err) => { if (err) console.error("Error drawing click:", err); });
+                        exec(`MouseClicker.exe click ${pixelX} ${pixelY}`, (error) => {
+                            if (error) console.error("Error clicking for type:", error);
+                            exec(`KeyboardTyper.exe ${base64Text} enter`, (err2) => { if (err2) console.error("Error typing:", err2); });
+                        });
+                        aiResponseText = aiResponseText.replace(/\[TYPE_ENTER:\d+,\d+:.*?\]/g, '').trim();
+                    }
+
+                    console.log('AI Response:', aiResponseText);
+
+                    // 3. Send response back to frontend
+                    ws.send(JSON.stringify({
+                        type: 'answer',
+                        text: aiResponseText
+                    }));
+
+                    if (hasNextStep) {
+                        ws.send(JSON.stringify({ type: 'status', text: 'İşlem devam ediyor (bekleniyor)...' }));
+                        await delay(3500); // Wait 3.5 seconds for UI to settle
+                        await processAgentLoop(currentMessages, ws, true);
+                    }
                 }
 
-                // Remove the special token just in case it's still there
-                aiResponseText = aiResponseText.replace(/\[SCREENSHOT_REQUEST\]/g, '').trim();
-                
-                // Parse and execute normalized Point requests [POINT:x,y:label]
-                const pointMatch = aiResponseText.match(/\[POINT:(\d+),(\d+):(.*?)\]/);
-                if (pointMatch) {
-                    const normX = parseInt(pointMatch[1], 10);
-                    const normY = parseInt(pointMatch[2], 10);
-                    
-                    // Convert 0-1000 scale to screen coordinates (assuming 1920x1080, getting actual from pureimage)
-                    const pixelX = Math.round((normX / 1000) * imgWidth);
-                    const pixelY = Math.round((normY / 1000) * imgHeight);
-
-                    console.log(`AI requested to point at normalized ${normX}, ${normY} -> Drawing at pixels ${pixelX}, ${pixelY}`);
-                    exec(`DrawCircle.exe ${pixelX} ${pixelY}`, (error) => {
-                        if (error) console.error("Error drawing circle:", error);
-                    });
-                    
-                    // Remove the token from the response text
-                    aiResponseText = aiResponseText.replace(/\[POINT:\d+,\d+:.*?\]/g, '').trim();
-                }
-
-                // Parse and execute normalized Click requests [CLICK:x,y]
-                const clickMatch = aiResponseText.match(/\[CLICK:(\d+),(\d+)\]/);
-                if (clickMatch) {
-                    const normX = parseInt(clickMatch[1], 10);
-                    const normY = parseInt(clickMatch[2], 10);
-                    
-                    const pixelX = Math.round((normX / 1000) * imgWidth);
-                    const pixelY = Math.round((normY / 1000) * imgHeight);
-
-                    console.log(`AI requested to click at normalized ${normX}, ${normY} -> Clicking at pixels ${pixelX}, ${pixelY}`);
-                    exec(`DrawClick.exe ${pixelX} ${pixelY}`, (err) => { if (err) console.error("Error drawing click:", err); });
-                    exec(`MouseClicker.exe click ${pixelX} ${pixelY}`, (error) => {
-                        if (error) console.error("Error clicking:", error);
-                    });
-                    
-                    aiResponseText = aiResponseText.replace(/\[CLICK:\d+,\d+\]/g, '').trim();
-                }
-
-                // Parse and execute normalized Double Click requests [DOUBLE_CLICK:x,y]
-                const dblClickMatch = aiResponseText.match(/\[DOUBLE_CLICK:(\d+),(\d+)\]/);
-                if (dblClickMatch) {
-                    const normX = parseInt(dblClickMatch[1], 10);
-                    const normY = parseInt(dblClickMatch[2], 10);
-                    
-                    const pixelX = Math.round((normX / 1000) * imgWidth);
-                    const pixelY = Math.round((normY / 1000) * imgHeight);
-
-                    console.log(`AI requested to double click at normalized ${normX}, ${normY} -> Double clicking at pixels ${pixelX}, ${pixelY}`);
-                    exec(`DrawClick.exe ${pixelX} ${pixelY} double`, (err) => { if (err) console.error("Error drawing double click:", err); });
-                    exec(`MouseClicker.exe doubleclick ${pixelX} ${pixelY}`, (error) => {
-                        if (error) console.error("Error double clicking:", error);
-                    });
-                    
-                    aiResponseText = aiResponseText.replace(/\[DOUBLE_CLICK:\d+,\d+\]/g, '').trim();
-                }
-
-                console.log('AI Response:', aiResponseText);
-
-                // 3. Send response back to frontend
-                ws.send(JSON.stringify({
-                    type: 'answer',
-                    text: aiResponseText
-                }));
+                await processAgentLoop(messages, ws, false);
             }
         } catch (error) {
             console.error('Error processing message:', error);
