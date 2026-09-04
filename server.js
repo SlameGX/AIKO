@@ -8,6 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
 import sharp from 'sharp';
+import fs from 'fs';
 
 dotenv.config();
 
@@ -70,6 +71,20 @@ wss.on('connection', (ws) => {
                                 required: ["to", "subject", "body"]
                             }
                         }
+                    },
+                    {
+                        type: "function",
+                        function: {
+                            name: "generate_image",
+                            description: "Kullanıcı senden bir resim, görsel veya fotoğraf oluşturmanı istediğinde bu fonksiyonu kullan.",
+                            parameters: {
+                                type: "object",
+                                properties: {
+                                    prompt: { type: "string", description: "Oluşturulacak görseli detaylı bir şekilde anlatan İngilizce prompt (betimleme)" }
+                                },
+                                required: ["prompt"]
+                            }
+                        }
                     }
                 ];
 
@@ -107,7 +122,15 @@ wss.on('connection', (ws) => {
                         model: process.env.MODEL_NAME || 'gemini-3.1-pro',
                         messages: currentMessages,
                         temperature: 0.7,
-                        tools: tools
+                        tools: tools,
+                        extra_body: {
+                            safetySettings: [
+                                { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+                                { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+                                { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+                                { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+                            ]
+                        }
                     });
 
                     let aiResponseText = response.choices[0].message.content || "";
@@ -121,16 +144,36 @@ wss.on('connection', (ws) => {
                                     const emailData = JSON.parse(toolCall.function.arguments);
                                     console.log('AI autonomously decided to send an email:', emailData);
                                     
-                                    fetch("https://n8n.feedagency.dev/webhook/88748273-7f98-4d16-86aa-8014f29fcc6b", {
-                                        method: "POST",
-                                        headers: { "Content-Type": "application/json" },
+                                    const n8nUrl = process.env.N8N_API_URL;
+                                    if (n8nUrl) {
+                                        fetch(n8nUrl, {
+                                            method: "POST",
+                                            headers: { "Content-Type": "application/json" },
                                         body: JSON.stringify(emailData)
                                     }).then(res => console.log("Email request sent to n8n. Status:", res.status))
-                                      .catch(err => console.error("Failed to send email to n8n:", err));
+                                          .catch(err => console.error("Failed to send email to n8n:", err));
+                                    } else {
+                                        console.error("N8N_API_URL is not set in .env");
+                                    }
                                       
                                     if (!aiResponseText) aiResponseText = "Maili başarıyla gönderdim.";
                                 } catch (e) {
                                     console.error('Failed to parse tool arguments:', e);
+                                }
+                            } else if (toolCall.function.name === 'generate_image') {
+                                try {
+                                    const imgData = JSON.parse(toolCall.function.arguments);
+                                    console.log('AI autonomously decided to generate an image:', imgData);
+                                    const encodedPrompt = encodeURIComponent(imgData.prompt);
+                                    const imgUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?nologo=true&width=1024&height=1024`;
+                                    
+                                    if (aiResponseText) {
+                                        aiResponseText += `\n\n![Oluşturulan Görsel](${imgUrl}) [NEXT_STEP]`;
+                                    } else {
+                                        aiResponseText = `İşte istediğin görsel:\n\n![Oluşturulan Görsel](${imgUrl}) [NEXT_STEP]`;
+                                    }
+                                } catch (e) {
+                                    console.error('Failed to parse generate_image arguments:', e);
                                 }
                             }
                         }
@@ -164,7 +207,15 @@ wss.on('connection', (ws) => {
                             model: process.env.MODEL_NAME || 'gemini-3.1-pro',
                             messages: currentMessages,
                             temperature: 0.7,
-                            tools: tools
+                            tools: tools,
+                            extra_body: {
+                                safetySettings: [
+                                    { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+                                    { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+                                    { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+                                    { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+                                ]
+                            }
                         });
                         
                         aiResponseText = response.choices[0].message.content || "";
@@ -175,10 +226,21 @@ wss.on('connection', (ws) => {
                                 if (toolCall.function.name === 'send_email') {
                                     try {
                                         const emailData = JSON.parse(toolCall.function.arguments);
-                                        fetch("https://n8n.feedagency.dev/webhook/88748273-7f98-4d16-86aa-8014f29fcc6b", {
-                                            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(emailData)
-                                        });
+                                        const n8nUrl = process.env.N8N_API_URL;
+                                        if (n8nUrl) {
+                                            fetch(n8nUrl, {
+                                                method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(emailData)
+                                            });
+                                        }
                                         if (!aiResponseText) aiResponseText = "Maili gönderdim.";
+                                    } catch (e) {}
+                                } else if (toolCall.function.name === 'generate_image') {
+                                    try {
+                                        const imgData = JSON.parse(toolCall.function.arguments);
+                                        const encodedPrompt = encodeURIComponent(imgData.prompt);
+                                        const imgUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?nologo=true&width=1024&height=1024`;
+                                        if (aiResponseText) aiResponseText += `\n\n![Oluşturulan Görsel](${imgUrl}) [NEXT_STEP]`;
+                                        else aiResponseText = `İşte istediğin görsel:\n\n![Oluşturulan Görsel](${imgUrl}) [NEXT_STEP]`;
                                     } catch (e) {}
                                 }
                             }
@@ -266,6 +328,37 @@ wss.on('connection', (ws) => {
                             exec(`KeyboardTyper.exe ${base64Text} enter`, (err2) => { if (err2) console.error("Error typing:", err2); });
                         });
                         aiResponseText = aiResponseText.replace(/\[TYPE_ENTER:\d+,\d+:.*?\]/g, '').trim();
+                    }
+
+                    // Parse and execute normalized Paste Image requests [PASTE_IMAGE:x,y:url]
+                    const pasteImageMatch = aiResponseText.match(/\[PASTE_IMAGE:(\d+),(\d+):(.*?)\]/);
+                    if (pasteImageMatch) {
+                        const normX = parseInt(pasteImageMatch[1], 10);
+                        const normY = parseInt(pasteImageMatch[2], 10);
+                        const imageUrl = pasteImageMatch[3];
+                        const pixelX = Math.round((normX / 1000) * loopImgWidth);
+                        const pixelY = Math.round((normY / 1000) * loopImgHeight);
+                        
+                        console.log(`AI requested to paste image at normalized ${normX}, ${normY} -> Clicking at ${pixelX}, ${pixelY} and pasting: ${imageUrl}`);
+                        ws.send(JSON.stringify({ type: 'status', text: 'Görsel indiriliyor ve yapıştırılıyor...' }));
+                        
+                        try {
+                            const res = await fetch(imageUrl);
+                            const arrayBuffer = await res.arrayBuffer();
+                            const buffer = Buffer.from(arrayBuffer);
+                            const tempImgPath = path.join(__dirname, 'temp_paste.png');
+                            fs.writeFileSync(tempImgPath, buffer);
+                            
+                            exec(`DrawClick.exe ${pixelX} ${pixelY}`, (err) => { if (err) console.error("Error drawing click:", err); });
+                            exec(`MouseClicker.exe click ${pixelX} ${pixelY}`, (error) => {
+                                if (error) console.error("Error clicking for paste image:", error);
+                                exec(`PasteImage.exe "${tempImgPath}"`, (err2) => { if (err2) console.error("Error pasting image:", err2); });
+                            });
+                        } catch(e) {
+                            console.error("Failed to download or paste image:", e);
+                        }
+                        
+                        aiResponseText = aiResponseText.replace(/\[PASTE_IMAGE:\d+,\d+:.*?\]/g, '').trim();
                     }
 
                     console.log('AI Response:', aiResponseText);

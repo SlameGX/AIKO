@@ -1,9 +1,12 @@
 using System;
-using System.Text;
+using System.Drawing;
+using System.IO;
+using System.Net;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Windows.Forms;
 
-namespace KeyboardTyper
+namespace PasteImage
 {
     class Program
     {
@@ -55,30 +58,32 @@ namespace KeyboardTyper
         }
 
         const uint INPUT_KEYBOARD = 1;
-        const uint KEYEVENTF_UNICODE = 0x0004;
         const uint KEYEVENTF_KEYUP = 0x0002;
+        const ushort VK_CONTROL = 0x11;
+        const ushort VK_V = 0x56;
         const ushort VK_RETURN = 0x0D;
 
-        static void SendUnicodeText(string text)
+        static void SendCtrlV()
         {
-            if (string.IsNullOrEmpty(text)) return;
-
-            INPUT[] inputs = new INPUT[text.Length * 2];
-            for (int i = 0; i < text.Length; i++)
-            {
-                inputs[i * 2].type = INPUT_KEYBOARD;
-                inputs[i * 2].u.ki.wVk = 0;
-                inputs[i * 2].u.ki.wScan = text[i];
-                inputs[i * 2].u.ki.dwFlags = KEYEVENTF_UNICODE;
-
-                inputs[i * 2 + 1].type = INPUT_KEYBOARD;
-                inputs[i * 2 + 1].u.ki.wVk = 0;
-                inputs[i * 2 + 1].u.ki.wScan = text[i];
-                inputs[i * 2 + 1].u.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
-            }
+            INPUT[] inputs = new INPUT[4];
+            
+            inputs[0].type = INPUT_KEYBOARD;
+            inputs[0].u.ki.wVk = VK_CONTROL;
+            
+            inputs[1].type = INPUT_KEYBOARD;
+            inputs[1].u.ki.wVk = VK_V;
+            
+            inputs[2].type = INPUT_KEYBOARD;
+            inputs[2].u.ki.wVk = VK_V;
+            inputs[2].u.ki.dwFlags = KEYEVENTF_KEYUP;
+            
+            inputs[3].type = INPUT_KEYBOARD;
+            inputs[3].u.ki.wVk = VK_CONTROL;
+            inputs[3].u.ki.dwFlags = KEYEVENTF_KEYUP;
+            
             SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
         }
-        
+
         static void SendEnter()
         {
             INPUT[] inputs = new INPUT[2];
@@ -100,23 +105,24 @@ namespace KeyboardTyper
         {
             if (args.Length == 0) return;
             
-            try {
-                byte[] data = Convert.FromBase64String(args[0]);
-                string text = Encoding.UTF8.GetString(data);
+            try
+            {
+                string path = args[0];
                 
-                bool pressEnter = (args.Length > 1 && args[1].ToLower() == "enter");
-                
-                // Give target window time to focus after the click happens
-                Thread.Sleep(300); 
-
-                SendUnicodeText(text);
-                
-                if (pressEnter) {
-                    SendEnter();
+                using (Image img = Image.FromFile(path))
+                {
+                    Clipboard.SetImage(img);
                 }
+                
+                Thread.Sleep(300);
+                SendCtrlV();
+                
+                Thread.Sleep(500); // Wait for the app (like Discord) to register the paste before hitting enter
+                SendEnter();
             }
-            catch (Exception) {
-                // Ignore exceptions silently for winexe
+            catch (Exception ex)
+            {
+                Console.WriteLine("Error: " + ex.Message);
             }
         }
     }

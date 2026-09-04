@@ -114,8 +114,22 @@ function speakText(text) {
 function appendMessage(text, sender) {
     const msgDiv = document.createElement('div');
     msgDiv.className = `message ${sender}`;
-    msgDiv.innerText = text;
+    
+    // Basic text escaping
+    const escapedText = document.createElement('div');
+    escapedText.innerText = text;
+    
+    // Replace markdown images
+    msgDiv.innerHTML = escapedText.innerHTML.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width: 100%; border-radius: 8px; margin-top: 8px;">');
+    
     chatArea.appendChild(msgDiv);
+    
+    // Wait for images to load before scrolling
+    const imgs = msgDiv.querySelectorAll('img');
+    imgs.forEach(img => {
+        img.onload = () => chatArea.scrollTop = chatArea.scrollHeight;
+    });
+    
     chatArea.scrollTop = chatArea.scrollHeight;
 }
 
